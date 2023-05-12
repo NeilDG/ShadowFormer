@@ -1,18 +1,14 @@
 import os
 import sys
 
-from adapter import dataset_loader
+import yaml
+from yaml import SafeLoader
 
-# add dir
-dir_name = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(dir_name,'./auxiliary/'))
-print(dir_name)
+from adapter import dataset_loader
 
 import argparse
 import options
-######### parser ###########
-opt = options.Options().init(argparse.ArgumentParser(description='image denoising')).parse_args()
-print(opt)
+
 
 import utils
 import torch
@@ -42,6 +38,15 @@ from utils.loader import get_training_data, get_validation_data
 
 
 def main():
+    # add dir
+    dir_name = os.path.dirname(os.path.abspath(__file__))
+    sys.path.append(os.path.join(dir_name, './auxiliary/'))
+    print(dir_name)
+
+    ######### parser ###########
+    opt = options.Options().init(argparse.ArgumentParser(description='image denoising')).parse_args()
+    print(opt)
+
     ######### Logs dir ###########
     log_dir = os.path.join(dir_name, 'log', opt.arch+opt.env)
     if not os.path.exists(log_dir):
@@ -115,6 +120,20 @@ def main():
         scheduler = StepLR(optimizer, step_size=step, gamma=0.5)
         scheduler.step()
 
+    # plot utils
+    plot_loss_path = "./reports/train_test_loss.yaml"
+    l1_loss = nn.L1Loss()
+    if (os.path.exists(plot_loss_path)):
+        with open(plot_loss_path) as f:
+            losses_dict = yaml.load(f, SafeLoader)
+    else:
+        losses_dict = {}
+        losses_dict["train"] = []
+        losses_dict["test_istd"] = []
+
+    print("Losses dict: ", losses_dict["train"])
+    current_step = 0
+    required_step_per_save = 500
 
     ######### Loss ###########
     criterion = CharbonnierLoss().cuda()
@@ -141,7 +160,7 @@ def main():
     mask_istd = "X:/ISTD_Dataset/test/test_B/*.png"
 
     opts = {}
-    opts["img_to_load"] = 1000
+    opts["img_to_load"] = 10000
     opts["num_workers"] = 12
     opts["cuda_device"] = "cuda:0"
     train_load_size = 16
@@ -157,8 +176,7 @@ def main():
     best_psnr = 0
     best_epoch = 0
     best_iter = 0
-    eval_now = 1000
-    print("\nEvaluation after every {} Iterations !!!\n".format(eval_now))
+    print("\nEvaluation after every {} Iterations !!!\n".format(required_step_per_save))
 
     # compute total progress
     max_epochs = opt.nepoch
@@ -180,6 +198,7 @@ def main():
         for i, (_, rgb_ws, rgb_ns, shadow_map, shadow_matte) in enumerate(train_loader, 0):
             # zero_grad
             index += 1
+            current_step = current_step + 1
             optimizer.zero_grad()
             input_ = rgb_ws.to(device)
             target = rgb_ns.to(device)
@@ -196,7 +215,10 @@ def main():
             pbar.update(1)
 
             #### Evaluation ####
-            if (index+1)%eval_now==0 and i>0:
+            if (current_step % required_step_per_save == 0):
+                train_loss = float(np.round(l1_loss(restored, target).item(), 4))
+                losses_dict["train"].append({current_step: train_loss})
+
                 eval_shadow_rmse = 0
                 eval_nonshadow_rmse = 0
                 eval_rmse = 0
@@ -205,13 +227,13 @@ def main():
                     psnr_val_rgb = []
                     for ii, (file_name, rgb_ws, rgb_ns, shadow_matte) in enumerate((val_loader), 0):
                         input_ = rgb_ws.to(device)
-                        target = rgb_ns.to(device)
+                        target_val = rgb_ns.to(device)
                         mask = shadow_matte.to(device)
-                        filenames = file_name
+
                         with torch.cuda.amp.autocast():
-                            restored = model_restoration(input_, mask)
-                        restored = torch.clamp(restored,0,1)
-                        psnr_val_rgb.append(utils.batch_PSNR(restored, target, False).item())
+                            restored_val = model_restoration(input_, mask)
+                        restored_val = torch.clamp(restored_val,0,1)
+                        psnr_val_rgb.append(utils.batch_PSNR(restored_val, target_val, False).item())
 
                     psnr_val_rgb = sum(psnr_val_rgb)/len(val_loader)
                     if psnr_val_rgb > best_psnr:
@@ -228,6 +250,15 @@ def main():
                             % (epoch, i, psnr_val_rgb,best_epoch,best_iter,best_psnr)+'\n')
                     model_restoration.train()
                     torch.cuda.empty_cache()
+
+                    test_loss = float(np.round(l1_loss(restored_val, target_val).item(), 4))
+                    losses_dict["test_istd"].append({current_step: test_loss})
+
+        plot_loss_file = open(plot_loss_path, "w")
+        yaml.dump(losses_dict, plot_loss_file)
+        plot_loss_file.close()
+        print("Dumped train test loss to ", plot_loss_path)
+
         scheduler.step()
 
         print("------------------------------------------------------------------")
