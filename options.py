@@ -11,11 +11,11 @@ class Options():
     def init(self, parser):
         # global settings
         parser.add_argument('--batch_size', type=int, default=7, help='batch size')
-        parser.add_argument('--nepoch', type=int, default=500, help='training epochs')
+        parser.add_argument('--nepoch', type=int, default=60, help='training epochs')
         parser.add_argument('--train_workers', type=int, default=0, help='train_dataloader workers')
         parser.add_argument('--eval_workers', type=int, default=8, help='eval_dataloader workers')
         parser.add_argument('--dataset', type=str, default='ISTD')
-        parser.add_argument('--pretrain_weights', type=str, default='./log/model_best.pth',
+        parser.add_argument('--pretrain_weights', type=str, default='./log/ShadowFormer_istd/models/model_best.pth',
                             help='path of pretrained_weights')
         parser.add_argument('--optimizer', type=str, default='adamw', help='optimizer for training')
         parser.add_argument('--lr_initial', type=float, default=0.0002, help='initial learning rate')
